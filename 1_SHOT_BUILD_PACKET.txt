@@ -1,1 +1,682 @@
 
+⸻
+
+ICT MSS SESSION ENTRY MODEL v1
+
+CANONICAL ONE-SHOT PINE V6 BUILD PACKET
+
+0. Build Role
+
+You are generating a Pine Script v6 indicator, not a strategy.
+
+The output must implement a single-chain ICT session model with this strict progression:
+
+ASIA_KZ build -> LONDON extend -> external freeze at 07:00 NY -> first NY sweep -> MSS -> PD filter -> filtered POI render
+
+The script must remain sparse, clean, and deterministic.
+If the chart looks busy before the full chain resolves, the build is wrong.
+
+⸻
+
+1. Identity
+	•	Script Type: indicator
+	•	Overlay: true
+	•	Pine Version: v6
+	•	Build Name: ICT MSS Session Entry Model v1
+	•	Logic Timezone: America/New_York
+
+⸻
+
+2. Repaint and Data Discipline
+	•	Use confirmed-bar only logic for:
+	•	sweep detection
+	•	MSS confirmation
+	•	FVG creation
+	•	IFVG inversion
+	•	POI rendering
+	•	Do not use provisional live-bar logic for setup decisions.
+	•	Do not use request.security().
+	•	Do not depend on chart timezone.
+	•	Do not use arrays unless absolutely required. For this build, arrays are unnecessary.
+	•	Global-scope visuals only. No illegal local-scope plot calls.
+
+⸻
+
+3. Execution-Day Ownership
+
+This is mandatory.
+	•	The execution day is the New York calendar day on which LONDON and NEW_YORK_KZ occur.
+	•	The ASIA_KZ session for execution day D runs from:
+	•	20:00 NY on D-1
+	•	to 00:00 NY on D
+	•	Therefore, the Asia range belongs to the following London/NY execution day.
+
+This must be implemented correctly or the whole model binds the wrong Asia range to the wrong NY session.
+
+⸻
+
+4. Session Definitions
+
+ASIA_KZ
+	•	Time: 20:00 -> 00:00 NY
+	•	Track High/Low: yes
+	•	Draw Box: yes
+	•	Purpose: build initial range
+
+LONDON
+	•	Time: 00:00 -> 05:00 NY
+	•	Track High/Low: yes
+	•	Draw Box: no
+	•	Purpose: extend range
+
+NEW_YORK_KZ
+	•	Time: 07:00 -> 11:00 NY
+	•	Track High/Low: no
+	•	Draw Box: no
+	•	Purpose: execution window only
+
+⸻
+
+5. Session Governance
+	•	All session membership must be computed using America/New_York.
+	•	No setup logic is allowed outside defined sessions.
+	•	Boundary logic is allowed for:
+	•	reset
+	•	session transition detection
+	•	cleanup
+	•	deleting expired visuals
+
+“Setup logic” means:
+	•	sweep detection
+	•	MSS detection
+	•	POI creation
+	•	setup rendering
+
+⸻
+
+6. Reset Model
+
+Reset Time
+	•	Reset at 00:00 NY
+
+Reset Scope
+
+Clear:
+	•	londonHigh
+	•	londonLow
+	•	externalHigh
+	•	externalLow
+	•	sweep state
+	•	MSS state
+	•	POI state
+	•	NY-only structure visuals
+	•	previous-day external lines
+
+Asia Carry Rule
+
+Because Asia ends at 00:00 NY, the just-completed Asia range must be locked into:
+	•	asiaHigh
+	•	asiaLow
+
+Those locked Asia values belong to the new execution day.
+
+Implementation rule:
+	•	old day state is cleared at midnight
+	•	completed Asia range is handed forward as the Asia range of the new execution day
+	•	no other previous-day carryover is allowed
+
+⸻
+
+7. State Machine
+
+The indicator must behave like this strict state machine:
+	•	S0_BUILD_ASIA
+	•	S1_BUILD_LONDON
+	•	S2_EXTERNAL_FROZEN
+	•	S3_SWEEP_RECORDED
+	•	S4_MSS_CONFIRMED
+	•	S5_POI_RENDERED
+	•	S6_SESSION_CLOSED
+
+Allowed transition chain:
+
+S0 -> S1 -> S2 -> S3 -> S4 -> S5 -> S6
+
+Disallowed examples:
+	•	S1 -> S4
+	•	S2 -> S4 without sweep
+	•	S3 -> S5 without MSS
+	•	a second sweep after S3
+
+⸻
+
+8. Persistent Variables
+
+The build must explicitly maintain these persistent fields.
+
+Session Range Fields
+	•	asiaWorkHigh
+	•	asiaWorkLow
+	•	asiaHigh
+	•	asiaLow
+	•	londonHigh
+	•	londonLow
+
+External Fields
+	•	externalHigh
+	•	externalLow
+	•	externalHighSwept
+	•	externalLowSwept
+
+Sweep Fields
+	•	sweepRecorded
+	•	sweepDirection (+1 buy-side sweep, -1 sell-side sweep)
+	•	sweepPrice
+	•	sweepTime
+	•	sweepHigh
+	•	sweepLow
+
+MSS Fields
+	•	mssConfirmed
+	•	mssDirection
+	•	mssLevel
+	•	mssTime
+	•	mssPivotTime
+
+POI Fields
+	•	OB candidate fields
+	•	FVG candidate fields
+	•	IFVG candidate fields
+
+Object Handles
+	•	Asia box handle
+	•	External high line handle
+	•	External low line handle
+	•	MSS line handle
+	•	One OB box handle
+	•	One FVG box handle
+	•	One IFVG box handle
+
+⸻
+
+9. Range Engine
+
+Asia Range
+
+During ASIA_KZ:
+	•	asiaWorkHigh = max(high)
+	•	asiaWorkLow = min(low)
+
+At Asia end:
+	•	lock into asiaHigh
+	•	lock into asiaLow
+
+Visual:
+	•	draw exactly one Asia box
+	•	update only that box during Asia
+	•	no London box
+	•	no NY box
+
+London Range
+
+During LONDON:
+	•	londonHigh = max(high)
+	•	londonLow = min(low)
+
+Visual:
+	•	none
+
+⸻
+
+10. External Liquidity Freeze
+
+At the start of NEW_YORK_KZ, exactly 07:00 NY:
+	•	externalHigh = max(asiaHigh, londonHigh)
+	•	externalLow = min(asiaLow, londonLow)
+
+Rules:
+	•	compute once
+	•	lock once
+	•	never update afterward within the same execution day
+	•	only one external high and one external low may exist
+
+Visuals:
+	•	draw one horizontal line at externalHigh
+	•	draw one horizontal line at externalLow
+	•	both extend forward until swept or new day reset
+
+⸻
+
+11. Sweep Engine
+
+Valid Window
+
+Sweep detection is valid only:
+	•	inside NEW_YORK_KZ
+	•	on confirmed bars
+	•	before any prior valid sweep has been recorded
+
+Sweep Definitions
+	•	Sell-side sweep: high > externalHigh
+	•	Buy-side sweep: low < externalLow
+
+Dual-Sweep Rejection
+
+If the same confirmed NY bar satisfies both:
+	•	high > externalHigh
+	•	low < externalLow
+
+then reject that bar as a valid sweep bar.
+
+No sweep is recorded on that bar.
+
+First Sweep Law
+
+Only the first valid sweep per execution day is stored.
+
+Stored Sweep Fields
+
+When a valid sweep occurs:
+	•	sweepDirection
+	•	sweepPrice
+	•	sweepTime
+	•	sweepHigh = high of sweep bar
+	•	sweepLow = low of sweep bar
+
+Line behavior:
+	•	if externalHigh is swept, stop that line at the sweep bar
+	•	if externalLow is swept, stop that line at the sweep bar
+
+⸻
+
+12. Premium / Discount Filter
+
+Internal only. Never draw it.
+
+Define:
+	•	equilibrium = (sweepHigh + sweepLow) / 2
+
+Rules:
+	•	Bullish setup: only POIs with midpoint strictly below equilibrium are valid
+	•	Bearish setup: only POIs with midpoint strictly above equilibrium are valid
+	•	Equality fails
+
+⸻
+
+13. MSS Engine
+
+This build does not reference any missing external MSS logic.
+The MSS logic is fully local and defined here.
+
+MSS Mode
+
+Use a confirmed pivot-based MSS engine.
+
+Pivot Length
+
+Canonical default:
+	•	pivot length = 2
+
+This may be exposed as an input, but default must be 2.
+
+Pivot Definitions
+	•	Swing High = confirmed pivot high
+	•	Swing Low = confirmed pivot low
+
+Only confirmed pivots may be used.
+
+MSS Eligibility
+
+MSS can occur only if:
+	•	inside NEW_YORK_KZ
+	•	on confirmed bars
+	•	after a valid sweep has already been recorded
+	•	no prior MSS has been confirmed for the day
+
+Bullish MSS
+
+After a buy-side sweep:
+	•	wait for the first confirmed swing high that exists after the sweep
+	•	bullish MSS occurs on the first confirmed NY bar that closes above that swing high
+
+Bearish MSS
+
+After a sell-side sweep:
+	•	wait for the first confirmed swing low that exists after the sweep
+	•	bearish MSS occurs on the first confirmed NY bar that closes below that swing low
+
+Stored MSS Fields
+
+When MSS confirms:
+	•	mssDirection
+	•	mssLevel
+	•	mssTime
+	•	mssPivotTime
+
+MSS Visual
+
+Draw exactly one MSS line:
+	•	from pivot time
+	•	to break time
+	•	at broken structure level
+
+Visibility:
+	•	NY only
+	•	delete when NY ends
+
+⸻
+
+14. Displacement Leg Definition
+
+The displacement leg causing MSS is:
+	•	the bar sequence beginning immediately after the sweep bar
+	•	ending at the MSS confirmation bar inclusive
+
+This displacement leg is the only valid sourcing window for the Order Block.
+
+⸻
+
+15. Order Block Engine
+
+Bullish OB
+
+After bullish MSS:
+	•	scan backward through the displacement leg only
+	•	select the last bearish candle
+	•	box bounds:
+	•	top = candle high
+	•	bottom = candle low
+
+Bearish OB
+
+After bearish MSS:
+	•	scan backward through the displacement leg only
+	•	select the last bullish candle
+	•	box bounds:
+	•	top = candle high
+	•	bottom = candle low
+
+OB Eligibility
+
+OB may render only if:
+	•	MSS is already confirmed
+	•	OB exists inside displacement leg
+	•	OB is inside NY
+	•	OB passes PD filter
+
+⸻
+
+16. FVG Engine
+
+Evaluate only on confirmed NY bars at or after MSS confirmation.
+
+Bullish FVG
+
+Exists when:
+	•	low[1] > high[2]
+
+Bounds:
+	•	top = low[1]
+	•	bottom = high[2]
+
+Bearish FVG
+
+Exists when:
+	•	high[1] < low[2]
+
+Bounds:
+	•	top = low[2]
+	•	bottom = high[1]
+
+FVG Eligibility
+
+Valid only if:
+	•	created after MSS
+	•	created inside NY
+	•	passes PD filter
+
+⸻
+
+17. IFVG Engine
+
+Bullish IFVG
+
+A prior bearish FVG becomes bullish IFVG when:
+	•	price trades through that bearish FVG
+	•	and a confirmed NY bar closes above the top of that bearish FVG
+
+Bearish IFVG
+
+A prior bullish FVG becomes bearish IFVG when:
+	•	price trades through that bullish FVG
+	•	and a confirmed NY bar closes below the bottom of that bullish FVG
+
+IFVG Eligibility
+
+Valid only if:
+	•	source FVG is valid
+	•	inversion occurs after MSS
+	•	inversion occurs inside NY
+	•	passes PD filter
+
+⸻
+
+18. POI Render Policy
+
+Maximum Visible POIs
+
+Show at most:
+	•	1 OB
+	•	1 FVG
+	•	1 IFVG
+
+Maximum visible total = 3
+
+Winner Rule
+
+If multiple candidates of the same type qualify:
+	•	keep only the most recent valid candidate
+	•	replace the prior one
+
+No Pre-MSS Rendering
+
+No POI may render before MSS.
+
+No Outside-NY Rendering
+
+No POI may render outside NY.
+
+If None Exist
+
+Show nothing.
+
+⸻
+
+19. Visual Contract
+
+Show Only
+	•	Asia box
+	•	External high line
+	•	External low line
+	•	MSS line inside NY only
+	•	Filtered POIs inside NY only
+
+Never Show
+	•	London box
+	•	NY session box
+	•	raw Asia high/low lines
+	•	raw London high/low lines
+	•	premium/discount zones
+	•	equilibrium line
+	•	breaker blocks
+	•	previous-day levels
+	•	clutter
+	•	debug visuals when debug is off
+
+⸻
+
+20. Object Lifecycle Rules
+
+Asia Box
+	•	create at Asia start
+	•	update during Asia
+	•	stop updating after Asia ends
+	•	belongs only to current execution day
+
+External Lines
+	•	create once at NY open
+	•	extend until swept or new day
+	•	delete at new day reset
+
+MSS Line
+	•	create once on MSS confirmation
+	•	visible only in NY
+	•	delete at NY end
+
+OB / FVG / IFVG Boxes
+	•	create only after MSS
+	•	visible only in NY
+	•	update right edge only while NY is active
+	•	delete at NY end
+
+⸻
+
+21. Debug Contract
+	•	Debug allowed
+	•	Default OFF
+	•	Debug must never affect logic
+	•	Debug may show:
+	•	session markers
+	•	state markers
+	•	sweep marker
+	•	MSS marker
+
+Debug may not:
+	•	alter calculations
+	•	alter filtering
+	•	create production objects that persist differently
+	•	bypass deletions
+	•	change state transitions
+
+⸻
+
+22. Implementation Constraints
+
+The code emitter must obey these rules:
+	•	Pine Script v6 only
+	•	explicit typing where needed
+	•	no multiline expression traps
+	•	no trailing commas
+	•	no illegal local-scope draw calls
+	•	no conditional plot() calls
+	•	no fake placeholders
+	•	no orphaned object handles
+	•	no chart-timezone dependency
+	•	no prior-day visual carryover
+	•	no extra features outside spec
+
+⸻
+
+23. Verification Battery
+
+A build passes only if all are true.
+
+Session / Range
+	•	Asia box appears correctly
+	•	London tracked internally only
+	•	external levels freeze exactly once at 07:00 NY
+	•	only one external high and one external low exist
+
+Sweep
+	•	sweep only inside NY
+	•	first valid sweep only
+	•	dual-sweep bar rejected
+	•	sweepHigh/sweepLow come from sweep candle
+
+MSS
+	•	MSS only after sweep
+	•	bullish MSS only after buy-side sweep
+	•	bearish MSS only after sell-side sweep
+	•	MSS line visible only in NY
+	•	MSS line deleted at NY end
+
+POIs
+	•	no POI before MSS
+	•	OB sourced only from displacement leg
+	•	FVG uses exact formula
+	•	IFVG requires trade-through plus close-based inversion
+	•	bullish setup shows only discount POIs
+	•	bearish setup shows only premium POIs
+	•	one active POI max per type
+	•	no POI remains after NY ends
+
+Visual Contract
+	•	no London box
+	•	no NY box
+	•	no raw session highs/lows
+	•	no premium/discount drawings
+	•	no previous-day production levels
+	•	no clutter
+
+⸻
+
+24. Failure Conditions
+
+Reject build if any of these occur:
+	•	external levels update after 07:00 NY
+	•	sweep detected outside NY
+	•	dual-sweep bar accepted
+	•	MSS confirmed before sweep
+	•	POIs render before MSS
+	•	OB sourced outside displacement leg
+	•	prior-day levels remain visible
+	•	debug changes logic behavior
+	•	chart timezone changes output behavior
+
+⸻
+
+25. Canonical Production Surface
+
+A correct chart should look like this:
+
+Before 07:00 NY
+	•	Asia box only
+
+At 07:00 NY
+	•	Asia box
+	•	external high
+	•	external low
+
+After first valid sweep
+	•	still sparse
+	•	one external line may terminate if swept
+
+After MSS
+	•	one clean MSS line
+	•	then only valid filtered POIs
+
+After 11:00 NY
+	•	no MSS line
+	•	no POIs
+	•	no prior-day structure carried forward
+
+If the chart gets noisy before the chain resolves, the build has drifted.
+
+⸻
+
+26. Final Emission Instruction
+
+Generate a single self-contained Pine Script v6 indicator implementing this packet exactly.
+
+Do not add features not named here.
+Do not substitute alternative MSS logic.
+Do not invent extra session visuals.
+Do not loosen render gates.
+Do not expose premium/discount visually.
+Do not preserve prior-day clutter.
+
+The governing law is:
+
+One sweep -> One MSS -> One clean setup
+
+⸻
